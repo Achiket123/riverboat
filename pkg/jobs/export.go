@@ -273,7 +273,7 @@ func (w *ExportContentWorker) Work(ctx context.Context, job *river.Job[jobspec.E
 		Status: &enums.ExportStatusReady,
 	}
 
-	_, err = w.olClient.UpdateExport(ctx, job.Args.ExportID, updateInput, []*graphql.Upload{upload})
+	_, err = w.olClient.UpdateExport(ctx, job.Args.ExportID, updateInput, []*graphql.Upload{upload}, goclient.WithImpersonationInterceptor(job.Args.UserID, job.Args.OrganizationID))
 	if err != nil {
 		log.Error().Err(err).Msg("failed to update export with file")
 		return w.updateExportStatus(ctx, job.Args.ExportID, enums.ExportStatusFailed, err)
@@ -677,50 +677,39 @@ func extractDetailsStrings(nodes []map[string]any) []string {
 	for _, n := range nodes {
 		flat := make(map[string]any)
 		flatten("", n, flat)
+		details, ok := flat["details"]
+		if !ok || details == nil || strings.TrimSpace(fmt.Sprint(details)) == "" {
+			continue
+		}
 
 		var buf strings.Builder
 
 		// Add common headers if they exist
-		if id, ok := flat["id"]; ok && id != nil {
-			buf.WriteString(fmt.Sprintf("<p><strong>ID:</strong> %v</p>\n", id))
-		}
-		if createdAt, ok := flat["created_at"]; ok && createdAt != nil {
-			buf.WriteString(fmt.Sprintf("<p><strong>Created At:</strong> %v</p>\n", createdAt))
-		}
 		if name, ok := flat["name"]; ok && name != nil {
 			buf.WriteString(fmt.Sprintf("<p><strong>Name:</strong> %v</p>\n", name))
 		}
 		if status, ok := flat["status"]; ok && status != nil {
 			buf.WriteString(fmt.Sprintf("<p><strong>Status:</strong> %v</p>\n", status))
 		}
+		if updatedAt, ok := flat["updated_at"]; ok && updatedAt != nil {
+			buf.WriteString(fmt.Sprintf("<p><strong>Last Updated At:</strong> %v</p>\n", updatedAt))
+		}
+		if updatedBy, ok := flat["updated_by"]; ok && updatedBy != nil {
+			buf.WriteString(fmt.Sprintf("<p><strong>Last Updated By:</strong> %v</p>\n", updatedBy))
+		}
+		if revision, ok := flat["revision"]; ok && revision != nil {
+			buf.WriteString(fmt.Sprintf("<p><strong>Version:</strong> %v</p>\n", revision))
+		}
 
 		buf.WriteString("<hr/>\n")
 
-		// Add the main content (details or fallback)
-		if details, ok := flat["details"]; ok && details != nil {
-			str := fmt.Sprint(details)
-			log.Info().Str("raw_details", str).Msg("extracted details field for debugging slate.js format")
-			if !strings.Contains(str, "<p>") && !strings.Contains(str, "<div>") && !strings.Contains(str, "<br") {
-				str = strings.ReplaceAll(str, "\n", "<br/>\n")
-			}
-			buf.WriteString(fmt.Sprintf("<div><strong>Summary:</strong><br/>\n%s</div>\n", str))
-		} else {
-			// Fallback: extract string representation for any val
-			buf.WriteString("<div><strong>Summary:</strong><br/>\n")
-			for k, v := range flat {
-				// skip the headers we already added
-				if k == "id" || k == "created_at" || k == "name" || k == "status" {
-					continue
-				}
-				if v != nil {
-					str := fmt.Sprint(v)
-					if strings.TrimSpace(str) != "" {
-						buf.WriteString(fmt.Sprintf("<strong>%s:</strong> %s<br/>\n", k, str))
-					}
-				}
-			}
-			buf.WriteString("</div>\n")
+		// Add the main content from details.
+		str := fmt.Sprint(details)
+		log.Info().Str("raw_details", str).Msg("extracted details field for debugging slate.js format")
+		if !strings.Contains(str, "<p>") && !strings.Contains(str, "<div>") && !strings.Contains(str, "<br") {
+			str = strings.ReplaceAll(str, "\n", "<br/>\n")
 		}
+		buf.WriteString(fmt.Sprintf("<div>%s</div>\n", str))
 
 		if buf.Len() > 0 {
 			results = append(results, buf.String())
