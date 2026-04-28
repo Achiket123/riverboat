@@ -162,13 +162,7 @@ func (w *ExportContentWorker) Work(ctx context.Context, job *river.Job[jobspec.E
 	// but we need it for DOCX, PDF, and MD exports.
 	// So just for csv we are not adding it
 	if export.Export.Format != enums.ExportFormatCsv {
-		hasDetails := false
-		for _, f := range fields {
-			if f == "details" {
-				hasDetails = true
-				break
-			}
-		}
+		hasDetails := slices.Contains(fields, "details")
 		if !hasDetails {
 			fields = append(fields, "details")
 		}
